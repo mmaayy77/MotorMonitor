@@ -1,0 +1,3 @@
+add_library(motor_client_core INTERFACE)
+target_include_directories(motor_client_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(motor_client_core INTERFACE motor_common)
