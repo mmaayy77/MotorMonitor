@@ -6,6 +6,7 @@
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QCheckBox>
+#include <QComboBox>
 
 namespace motor {
 
@@ -27,6 +28,7 @@ private:
     QCheckBox* _enabledCheck{nullptr};
     QCheckBox* _autoConnectCheck{nullptr};
     QDoubleSpinBox* _ratedCurrentSpin{nullptr};
+    QComboBox* _protocolCombo{nullptr};
 };
 
 }

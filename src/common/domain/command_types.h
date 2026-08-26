@@ -10,7 +10,8 @@ enum class CommandType {
     SetTargetSpeed,
     EmergencyStop,
     ClearRecoverableAlarm,
-    QueryStatus
+    QueryStatus,
+    InjectProtocolFault
 };
 
 enum class CommandStatus {
@@ -27,6 +28,7 @@ struct CommandRequest {
     DeviceId deviceId;
     CommandType type{CommandType::QueryStatus};
     quint16 targetSpeedRpm{0};
+    quint8 protocolFaultMode{0};
     qint64 sentAtMs{0};
 };
 

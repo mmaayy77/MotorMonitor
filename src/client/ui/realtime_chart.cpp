@@ -24,6 +24,12 @@ void RealtimeChart::appendData(double temperature, double speed, double current)
     update();
 }
 
+void RealtimeChart::clearData()
+{
+    _buffer.clear();
+    update();
+}
+
 void RealtimeChart::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event)

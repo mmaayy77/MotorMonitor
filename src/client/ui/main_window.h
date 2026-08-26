@@ -30,13 +30,15 @@ class Repository;
 class RealtimeChart;
 class HistoryPage;
 class LogPage;
+class CommunicationWorker;
+class StorageWorker;
+class PerformancePanel;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(std::shared_ptr<ConnectionManager> connManager,
-                        std::shared_ptr<AlarmEngine> alarmEngine,
-                        std::shared_ptr<Repository> repo,
+    explicit MainWindow(CommunicationWorker* commWorker,
+                        StorageWorker* storageWorker,
                         QWidget* parent = nullptr);
     ~MainWindow() override;
 
@@ -75,15 +77,21 @@ private:
     void loadDefaultDevices();
     void updateDetailPanel(const DeviceId& deviceId);
     void updateOperatingStateDisplay(OperatingState state);
+    void updateButtonStates();
+    void updateDiagnosisDisplay();
+    void updateLastCommandDisplay();
+    void updateAlarmStats();
     void updateGlobalStatusBar();
     void appendLog(const QString& message);
     void addAlarmEvent(const AlarmEvent& event);
     void updateAlarmRow(const Alarm& alarm);
     QString ruleName(RuleCode code) const;
 
-    std::shared_ptr<ConnectionManager> _connManager;
-    std::shared_ptr<AlarmEngine> _alarmEngine;
-    std::shared_ptr<Repository> _repo;
+    CommunicationWorker* _commWorker{nullptr};
+    StorageWorker* _storageWorker{nullptr};
+    ConnectionManager* _connManager{nullptr};
+    AlarmEngine* _alarmEngine{nullptr};
+    Repository* _repo{nullptr};
 
     DeviceListModel* _deviceModel{nullptr};
     DeviceId _selectedDevice;
@@ -99,6 +107,7 @@ private:
     QWidget* _trendPanel{nullptr};
     HistoryPage* _historyPage{nullptr};
     LogPage* _logPage{nullptr};
+    PerformancePanel* _perfPanel{nullptr};
 
     QLabel* _statusLabel{nullptr};
     QLabel* _listStatusLabel{nullptr};
@@ -109,6 +118,9 @@ private:
     QLabel* _voltageLabel{nullptr};
     QLabel* _vibrationLabel{nullptr};
 
+    QLabel* _diagnosisLabel{nullptr};
+    QLabel* _lastCommandLabel{nullptr};
+
     QPushButton* _connectBtn{nullptr};
     QPushButton* _disconnectBtn{nullptr};
     QPushButton* _startBtn{nullptr};
@@ -118,6 +130,7 @@ private:
     QPushButton* _setSpeedBtn{nullptr};
 
     QTableWidget* _alarmTable{nullptr};
+    QLabel* _alarmStatsLabel{nullptr};
     QTextEdit* _logEdit{nullptr};
 
     RealtimeChart* _chart{nullptr};
@@ -134,6 +147,7 @@ private:
     int _messageCount{0};
     bool _needsRefresh{false};
     Telemetry _latestTelemetry;
+    CommandResult _lastCommandResult;
 };
 
 }

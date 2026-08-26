@@ -4,6 +4,7 @@
 #include "domain/alarm_types.h"
 #include "domain/command_types.h"
 #include "protocol/frame_codec.h"
+#include "protocol/protocol_adapter.h"
 #include <QObject>
 #include <QTcpSocket>
 #include <QTimer>
@@ -44,6 +45,7 @@ private:
     DeviceConfig _config;
     QTcpSocket* _socket{nullptr};
     protocol::FrameDecoder _decoder;
+    protocol::ProtocolAdapterPtr _protocolAdapter;
     ConnectionState _state{ConnectionState::Disconnected};
     QTimer* _heartbeatTimer{nullptr};
     QTimer* _reconnectTimer{nullptr};

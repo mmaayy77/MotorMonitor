@@ -5,161 +5,108 @@
 ## 技术栈
 
 - **C++17** + **Qt 6.8** (Widgets / Network / SQL)
-- **SQLite** 持久化存储
-- **CMake** 构建系统
-- **GoogleTest** 单元测试
-- **自定义二进制协议** (长度帧 + CRC32)
+- **SQLite** 持久化存储 (WAL 模式)
+- **CMake** 模块化构建系统
+- **GoogleTest** 单元测试 (56+ 用例)
+- **双协议栈**: 自定义二进制协议 + Modbus TCP
+- **Docker** 容器化部署
+- **GitHub Actions** CI/CD 自动化
 
 ## 快速开始
 
 ### 环境要求
 
-- Windows 10/11
-- Qt 6.5+ (含 MinGW 编译器)
+- Windows 10/11 / Ubuntu 22.04+
+- Qt 6.5+ (MinGW / GCC)
 - CMake 3.21+
 - Git
 
-### 构建
+### 构建运行
 
 ```bash
-# 克隆项目
-git clone <repo-url>
-cd MotorMonitor
-
-# CMake 配置
-cmake -B build -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/mingw_64" -G "MinGW Makefiles"
-
-# 编译
-cmake --build build --config Debug
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build --target all -j$(nproc)
+./build/src/client/motor_monitor_client
 ```
 
-### 运行
+### 运行测试
 
-在 Qt Creator 中打开 `CMakeLists.txt`，直接运行 `motor_monitor_client` 即可。
-
-**客户端会自动启动模拟器**，无需手动操作。
-
-## 功能演示
-
-### 1. 设备连接
-
-```
-点击"批量生成" → 创建 10 台设备
-选中 MOTOR-0001 → 点击"上线" → 状态变为绿色"在线"
+```bash
+cd build && ctest --output-on-failure
 ```
 
-### 2. 实时监控
+### Docker 部署
 
-```
-点击"启动" → 电机开始运转 → 实时曲线显示温度/转速/电流
-全局状态栏显示: 在线: 1/10 | 活动告警: 0 | 速率: 5 帧/秒
-```
-
-### 3. 远程控制
-
-```
-调节转速 → 点击"设置" → 目标转速更新
-点击"停止" → 正常停机
-点击"急停" → 紧急停机 (红色警告)
-```
-
-### 4. 告警诊断
-
-```
-模拟器注入故障 → 告警面板显示告警
-点击"确认告警" → 状态变为"已确认"
-故障恢复后 → 状态变为"已恢复" → 点击"清除"
-```
-
-### 5. 历史查询
-
-```
-切换到"历史查询"标签页
-选择设备 + 时间范围 → 点击"查询"
-支持遥测/告警/控制/事件四种数据
-点击"导出CSV" → 导出 UTF-8 CSV 文件
-```
-
-## 项目结构
-
-```
-src/
-├── common/                    # 公共模块
-│   ├── domain/                # 领域类型 (device/command/alarm)
-│   ├── protocol/              # 二进制协议编解码 + CRC32
-│   ├── alarm_engine/          # 告警规则引擎 (8条规则)
-│   └── persistence/           # SQLite 仓储
-├── client/                    # 客户端
-│   ├── network/               # 设备连接管理 (心跳/重连/超时)
-│   ├── ui/                    # UI 组件
-│   │   ├── main_window.cpp    # 主窗口
-│   │   ├── device_list_model.cpp  # 设备列表模型
-│   │   ├── realtime_chart.cpp     # 实时曲线图 (QPainter)
-│   │   ├── history_page.cpp       # 历史查询 + CSV导出
-│   │   ├── log_page.cpp           # 运行日志 (分级/分类/筛选)
-│   │   └── device_config_dialog.cpp # 设备配置对话框
-│   └── main.cpp               # 入口 (自动启动模拟器)
-├── simulator/                 # 模拟器
-│   ├── core/motor_model.cpp   # 电机物理模型
-│   └── network/               # TCP 服务器 + 会话管理
-└── tests/                     # 测试
-    └── unit/                  # 56+ 单元测试
+```bash
+docker-compose up --build
 ```
 
 ## 架构
 
 ```
-┌──────────────┐    TCP (二进制协议)    ┌──────────────────┐
-│   客户端 UI   │ ◄──────────────────► │     模拟器        │
-│              │                      │                  │
-│  ┌────────┐  │  ConnectRequest      │  ┌────────────┐  │
-│  │ 设备列表 │  │  Heartbeat          │  │ DeviceServer│  │
-│  │ 实时曲线 │  │  TelemetryReport    │  │  ├─Session1 │  │
-│  │ 告警面板 │  │  ControlRequest     │  │  ├─Session2 │  │
-│  │ 历史查询 │  │  ControlResponse    │  │  └─SessionN │  │
-│  │ 运行日志 │  │                      │  └────────────┘  │
-│  └────────┘  │                      │                  │
-│  ┌────────┐  │                      │  ┌────────────┐  │
-│  │ SQLite  │  │                      │  │ MotorModel │  │
-│  └────────┘  │                      │  │ (物理模型)  │  │
-└──────────────┘                      │  └────────────┘  │
-                                      └──────────────────┘
+UI 线程 ──信号/槽──► 通信线程 ──信号/槽──► 存储线程
+(Widgets)           (QTcpSocket)          (SQLite)
 ```
 
-## 告警规则
+## 功能模块
 
-| 规则 | 级别 | 触发条件 | 恢复条件 |
-|------|------|----------|----------|
-| 高温预警 | 警告 | 温度连续3次 > 85°C | 温度连续3次 < 80°C |
-| 严重过热 | 严重 | 温度任意1次 > 100°C | 温度连续3次 < 90°C |
-| 过流 | 警告 | 电流连续3次 > 额定值 | 电流连续3次 < 额定90% |
-| 堵转 | 严重 | 转速 < 目标10% 且电流 > 额定120% | 转速恢复至目标80% |
-| 振动异常 | 警告 | 振动连续5次 > 7.1 mm/s | 振动连续5次 < 6.0 mm/s |
-| 电压异常 | 警告 | 电压连续3次 < 200V 或 > 240V | 电压连续3次 205~235V |
-| 心跳超时 | 严重 | 5秒无消息 | 重连并收到心跳 |
-| 遥测停更 | 警告 | 在线但5秒无遥测 | 收到下一条遥测 |
+| 模块 | 说明 |
+|------|------|
+| 设备管理 | 100 台设备列表、搜索筛选、批量生成、配置持久化 |
+| 实时监控 | 温度/转速/电流/电压/振动，QPainter 自绘曲线 |
+| 告警引擎 | 8 条规则，完整生命周期（激活/确认/恢复/关闭） |
+| 远程控制 | 启动/停止/急停/调速，按钮状态联动 |
+| 诊断展示 | 实际值 vs 阈值，告警依据 + 最近控制结果 |
+| 历史查询 | 4 类查询，分页 + CSV 导出 |
+| 运行日志 | 分级/分类/设备筛选，10 MiB 滚动保存 |
+| 性能观测 | 消息速率/写入速率/错误数/重连次数 |
+| 模拟器 | 电机物理模型，故障注入，协议层故障 |
+| 协议适配 | 策略模式，支持自定义协议 / Modbus TCP |
 
-## 二进制协议
+## 设计模式
 
-| 字段 | 长度 | 说明 |
-|------|------|------|
-| Magic | 2 字节 | 0x4D54 |
-| Version | 1 字节 | 1 |
-| TotalLength | 4 字节 | 含头部+Payload+CRC32 |
-| MessageType | 2 字节 | 消息类型 |
-| Sequence | 4 字节 | 递增序列号 |
-| RequestId | 8 字节 | 请求响应匹配 |
-| Timestamp | 8 字节 | Unix 毫秒 |
-| Payload | 变长 | 按类型编码 |
-| CRC32 | 4 字节 | 帧完整性校验 |
+| 模式 | 应用 |
+|------|------|
+| 策略模式 | IProtocolAdapter → Custom / ModbusTCP |
+| 工厂模式 | createAdapter(type) |
+| 观察者模式 | Qt 信号/槽跨线程 |
+| 仓储模式 | Repository → SqliteRepository |
+| 依赖注入 | Worker 注入 MainWindow |
 
-## 运行测试
+## 项目结构
 
-```bash
-cmake --build build --target motor_monitor_tests
-ctest --test-dir build --output-on-failure
+```
+├── src/
+│   ├── client/          # 客户端
+│   │   ├── core/         # JSON 配置
+│   │   ├── network/      # 通信层 (Worker + Connection)
+│   │   ├── ui/           # 界面层 (MainWindow + 面板)
+│   │   └── main.cpp
+│   ├── common/          # 公共库
+│   │   ├── protocol/     # 协议编解码 + 适配器
+│   │   ├── domain/       # 领域类型
+│   │   ├── alarm_engine/ # 告警引擎
+│   │   └── persistence/  # SQLite 仓储
+│   └── simulator/       # 电机模拟器
+├── tests/               # 单元测试 + 集成测试
+├── cmake/               # CMake 配置
+├── .github/workflows/   # CI/CD
+├── Dockerfile
+├── docker-compose.yml
+└── CMakeLists.txt
 ```
 
-## 作者
+## 配置文件
 
-MotorMonitor - 工业电机远程监控系统 MVP
+首次运行自动生成 `config.json`，支持自定义：
+
+```json
+{
+    "autoStartSimulator": true,
+    "batchGenerateCount": 100,
+    "defaultHost": "127.0.0.1",
+    "defaultPort": 9000,
+    "devicePresets": [],
+    "logLevel": "Info"
+}
+```

@@ -12,13 +12,13 @@
 namespace motor {
 
 class ConnectionManager;
-class Repository;
+class StorageWorker;
 
 class HistoryPage : public QWidget {
     Q_OBJECT
 public:
-    explicit HistoryPage(std::shared_ptr<ConnectionManager> connManager,
-                         std::shared_ptr<Repository> repo,
+    explicit HistoryPage(ConnectionManager* connManager,
+                         StorageWorker* storageWorker,
                          QWidget* parent = nullptr);
 
     void refreshDeviceList();
@@ -40,8 +40,8 @@ private:
     void exportToCsv(const QStringList& headers, const QList<QStringList>& rows);
     QString ruleName(int code) const;
 
-    std::shared_ptr<ConnectionManager> _connManager;
-    std::shared_ptr<Repository> _repo;
+    ConnectionManager* _connManager{nullptr};
+    StorageWorker* _storageWorker{nullptr};
 
     QComboBox* _deviceCombo{nullptr};
     QComboBox* _typeCombo{nullptr};

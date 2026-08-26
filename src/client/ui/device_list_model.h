@@ -36,6 +36,7 @@ public:
 
 public slots:
     void updateSnapshot(const DeviceSnapshot& snapshot);
+    void updateConnectionState(DeviceId deviceId, ConnectionState state, int alarmCount);
     void removeDevice(DeviceId deviceId);
     void setFilterText(const QString& text);
     void setFilterMode(FilterMode mode);

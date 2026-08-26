@@ -136,6 +136,10 @@ CommandResult MotorModel::doExecute(const CommandRequest& request) {
         result.status = CommandStatus::Succeeded;
         result.message = QStringLiteral("OK");
         break;
+    case CommandType::InjectProtocolFault:
+        break;
+    default:
+        break;
     }
 
     return result;

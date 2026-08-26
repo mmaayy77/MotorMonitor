@@ -121,6 +121,7 @@ QByteArray encodeCommand(const CommandRequest& cmd) {
     result.append(reinterpret_cast<const char*>(&typeBE), sizeof(typeBE));
     result.append(reinterpret_cast<const char*>(&targetBE), sizeof(targetBE));
     result.append(reinterpret_cast<const char*>(&sentBE), sizeof(sentBE));
+    result.append(reinterpret_cast<const char*>(&cmd.protocolFaultMode), 1);
     result.append(reinterpret_cast<const char*>(&idLen), 1);
     result.append(idBytes);
 
@@ -128,7 +129,7 @@ QByteArray encodeCommand(const CommandRequest& cmd) {
 }
 
 std::optional<CommandRequest> decodeCommand(QByteArrayView payload) {
-    if (payload.size() < 8 + 2 + 2 + 8 + 1) return std::nullopt;
+    if (payload.size() < 8 + 2 + 2 + 8 + 1 + 1) return std::nullopt;
     int offset = 0;
 
     CommandRequest cmd;
@@ -143,6 +144,8 @@ std::optional<CommandRequest> decodeCommand(QByteArrayView payload) {
     offset += 2;
     cmd.sentAtMs = qFromBigEndian<qint64>(reinterpret_cast<const uchar*>(payload.data() + offset));
     offset += 8;
+
+    cmd.protocolFaultMode = static_cast<quint8>(payload[offset++]);
 
     quint8 idLen = static_cast<quint8>(payload[offset++]);
     if (offset + idLen != payload.size()) return std::nullopt;

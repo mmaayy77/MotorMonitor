@@ -12,6 +12,7 @@ public:
     explicit RealtimeChart(QWidget* parent = nullptr);
 
     void appendData(double temperature, double speed, double current);
+    void clearData();
 
 protected:
     void paintEvent(QPaintEvent* event) override;

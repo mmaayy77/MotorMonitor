@@ -1,5 +1,6 @@
 #include "device_connection.h"
 #include "protocol/message_codec.h"
+#include "protocol/custom_protocol_adapter.h"
 #include <QHostAddress>
 #include <QElapsedTimer>
 #include <QDebug>
@@ -9,6 +10,8 @@ namespace motor {
 DeviceConnection::DeviceConnection(const DeviceConfig& config, QObject* parent)
     : QObject(parent)
     , _config(config)
+    , _protocolAdapter(protocol::createAdapter(
+        static_cast<protocol::ProtocolType>(config.protocolType)))
 {
     _socket = new QTcpSocket(this);
     _heartbeatTimer = new QTimer(this);
@@ -115,7 +118,7 @@ void DeviceConnection::sendFrame(protocol::MessageType type, const QByteArray& p
     frame.requestId = 0;
     frame.timestampMs = 0;
     frame.payload = payload;
-    _socket->write(protocol::encodeFrame(frame));
+    _socket->write(_protocolAdapter->encodeFrame(frame));
 }
 
 void DeviceConnection::onConnected()

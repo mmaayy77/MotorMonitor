@@ -1,6 +1,6 @@
 #include "history_page.h"
 #include "connection_manager.h"
-#include "persistence/repository.h"
+#include "storage_worker.h"
 #include "domain/device_types.h"
 #include "domain/command_types.h"
 #include "domain/alarm_types.h"
@@ -14,15 +14,16 @@
 #include <QFile>
 #include <QMessageBox>
 #include <QDateTime>
+#include <QMetaObject>
 
 namespace motor {
 
-HistoryPage::HistoryPage(std::shared_ptr<ConnectionManager> connManager,
-                         std::shared_ptr<Repository> repo,
+HistoryPage::HistoryPage(ConnectionManager* connManager,
+                         StorageWorker* storageWorker,
                          QWidget* parent)
     : QWidget(parent)
-    , _connManager(std::move(connManager))
-    , _repo(std::move(repo))
+    , _connManager(connManager)
+    , _storageWorker(storageWorker)
 {
     setupUi();
 }
@@ -153,9 +154,19 @@ void HistoryPage::onQueryClicked()
     }
 }
 
+template<typename T>
+static T invokeStorage(QObject* worker, const char* method, QGenericArgument arg0 = {},
+                        QGenericArgument arg1 = {}, QGenericArgument arg2 = {},
+                        QGenericArgument arg3 = {}, QGenericArgument arg4 = {})
+{
+    T result;
+    QMetaObject::invokeMethod(worker, method, Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(T, result), arg0, arg1, arg2, arg3, arg4);
+    return result;
+}
+
 void HistoryPage::queryTelemetryData()
 {
-    if (!_repo || !_repo->isOpen()) return;
     TelemetryQuery q;
     if (_deviceCombo->currentIndex() > 0) {
         q.deviceId = _deviceCombo->currentText();
@@ -165,7 +176,11 @@ void HistoryPage::queryTelemetryData()
     q.limit = _pageSize;
     q.offset = _currentPage * _pageSize;
 
-    auto results = _repo->queryTelemetry(q);
+    QList<Telemetry> results;
+    QMetaObject::invokeMethod(_storageWorker, "queryTelemetry", Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(QList<Telemetry>, results),
+                              Q_ARG(TelemetryQuery, q));
+
     _table->setRowCount(static_cast<int>(results.size()));
     for (int i = 0; i < results.size(); ++i) {
         const auto& t = results[i];
@@ -196,7 +211,6 @@ void HistoryPage::queryTelemetryData()
 
 void HistoryPage::queryAlarmData()
 {
-    if (!_repo || !_repo->isOpen()) return;
     AlarmQuery q;
     if (_deviceCombo->currentIndex() > 0) {
         q.deviceId = _deviceCombo->currentText();
@@ -206,7 +220,11 @@ void HistoryPage::queryAlarmData()
     q.limit = _pageSize;
     q.offset = _currentPage * _pageSize;
 
-    auto results = _repo->queryAlarms(q);
+    QList<Alarm> results;
+    QMetaObject::invokeMethod(_storageWorker, "queryAlarms", Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(QList<Alarm>, results),
+                              Q_ARG(AlarmQuery, q));
+
     _table->setRowCount(static_cast<int>(results.size()));
     for (int i = 0; i < results.size(); ++i) {
         const auto& a = results[i];
@@ -236,7 +254,6 @@ void HistoryPage::queryAlarmData()
 
 void HistoryPage::queryCommandData()
 {
-    if (!_repo || !_repo->isOpen()) return;
     CommandQuery q;
     if (_deviceCombo->currentIndex() > 0) {
         q.deviceId = _deviceCombo->currentText();
@@ -246,7 +263,11 @@ void HistoryPage::queryCommandData()
     q.limit = _pageSize;
     q.offset = _currentPage * _pageSize;
 
-    auto results = _repo->queryCommands(q);
+    QList<CommandResult> results;
+    QMetaObject::invokeMethod(_storageWorker, "queryCommands", Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(QList<CommandResult>, results),
+                              Q_ARG(CommandQuery, q));
+
     _table->setRowCount(static_cast<int>(results.size()));
     for (int i = 0; i < results.size(); ++i) {
         const auto& c = results[i];
@@ -283,7 +304,6 @@ void HistoryPage::queryCommandData()
 
 void HistoryPage::queryEventData()
 {
-    if (!_repo || !_repo->isOpen()) return;
     DeviceEventQuery q;
     if (_deviceCombo->currentIndex() > 0) {
         q.deviceId = _deviceCombo->currentText();
@@ -293,7 +313,11 @@ void HistoryPage::queryEventData()
     q.limit = _pageSize;
     q.offset = _currentPage * _pageSize;
 
-    auto results = _repo->queryDeviceEvents(q);
+    QList<DeviceEvent> results;
+    QMetaObject::invokeMethod(_storageWorker, "queryDeviceEvents", Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(QList<DeviceEvent>, results),
+                              Q_ARG(DeviceEventQuery, q));
+
     _table->setRowCount(static_cast<int>(results.size()));
     for (int i = 0; i < results.size(); ++i) {
         const auto& e = results[i];
@@ -396,6 +420,17 @@ void HistoryPage::exportToCsv(const QStringList& headers, const QList<QStringLis
                              QStringLiteral("已导出 %1 条记录到:\n%2").arg(rows.size()).arg(fileName));
 }
 
+void HistoryPage::refreshDeviceList()
+{
+    _deviceCombo->blockSignals(true);
+    _deviceCombo->clear();
+    _deviceCombo->addItem(QStringLiteral("全部设备"));
+    for (auto* conn : _connManager->allConnections()) {
+        _deviceCombo->addItem(conn->deviceId());
+    }
+    _deviceCombo->blockSignals(false);
+}
+
 QString HistoryPage::ruleName(int code) const
 {
     switch (code) {
@@ -409,17 +444,6 @@ QString HistoryPage::ruleName(int code) const
     case 7: return QStringLiteral("遥测停更");
     default: return QStringLiteral("未知");
     }
-}
-
-void HistoryPage::refreshDeviceList()
-{
-    _deviceCombo->blockSignals(true);
-    _deviceCombo->clear();
-    _deviceCombo->addItem(QStringLiteral("全部设备"));
-    for (auto* conn : _connManager->allConnections()) {
-        _deviceCombo->addItem(conn->deviceId());
-    }
-    _deviceCombo->blockSignals(false);
 }
 
 }

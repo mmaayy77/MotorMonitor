@@ -60,6 +60,11 @@ void DeviceConfigDialog::setupUi()
     _ratedCurrentSpin->setSuffix(QStringLiteral(" A"));
     settingsForm->addRow(QStringLiteral("额定电流:"), _ratedCurrentSpin);
 
+    _protocolCombo = new QComboBox();
+    _protocolCombo->addItem(QStringLiteral("自定义二进制协议"), 0);
+    _protocolCombo->addItem(QStringLiteral("Modbus TCP"), 2);
+    settingsForm->addRow(QStringLiteral("通信协议:"), _protocolCombo);
+
     mainLayout->addWidget(settingsGroup);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -77,6 +82,8 @@ void DeviceConfigDialog::setDeviceConfig(const DeviceConfig& config)
     _enabledCheck->setChecked(config.enabled);
     _autoConnectCheck->setChecked(config.autoConnect);
     _ratedCurrentSpin->setValue(static_cast<double>(config.ratedCurrentA));
+    int protocolIdx = _protocolCombo->findData(config.protocolType);
+    if (protocolIdx >= 0) _protocolCombo->setCurrentIndex(protocolIdx);
 }
 
 DeviceConfig DeviceConfigDialog::deviceConfig() const
@@ -89,6 +96,7 @@ DeviceConfig DeviceConfigDialog::deviceConfig() const
     cfg.enabled = _enabledCheck->isChecked();
     cfg.autoConnect = _autoConnectCheck->isChecked();
     cfg.ratedCurrentA = static_cast<float>(_ratedCurrentSpin->value());
+    cfg.protocolType = _protocolCombo->currentData().toInt();
     return cfg;
 }
 

@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QPushButton>
 #include <QTextEdit>
+#include <QTimer>
 #include <QDateTime>
 #include <QString>
 #include <QList>
@@ -44,6 +45,9 @@ public:
                    const QString& deviceId, const QString& message);
     void addDeviceToFilter(const QString& deviceId);
     void removeDeviceFromFilter(const QString& deviceId);
+    void saveToFile();
+    void flushToFile();
+    void rotateLogFiles();
 
 private slots:
     void onFilterChanged();
@@ -62,6 +66,8 @@ private:
     QComboBox* _categoryFilter{nullptr};
     QComboBox* _deviceFilter{nullptr};
     QPushButton* _clearBtn{nullptr};
+    QTimer* _flushTimer{nullptr};
+    QString _logDir;
     bool _autoScroll{true};
 };
 

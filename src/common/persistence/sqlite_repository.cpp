@@ -144,7 +144,8 @@ bool SqliteRepository::createTables()
             port INTEGER NOT NULL,
             enabled INTEGER NOT NULL,
             auto_connect INTEGER NOT NULL,
-            rated_current_a REAL NOT NULL
+            rated_current_a REAL NOT NULL,
+            protocol_type INTEGER NOT NULL DEFAULT 0
         )
     )");
 
@@ -438,8 +439,8 @@ bool SqliteRepository::saveDeviceConfig(const DeviceConfig& config)
     QSqlQuery q(_db);
     q.prepare(R"(
         INSERT OR REPLACE INTO device_config
-        (device_id, display_name, host, port, enabled, auto_connect, rated_current_a)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (device_id, display_name, host, port, enabled, auto_connect, rated_current_a, protocol_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     )");
     q.addBindValue(config.deviceId);
     q.addBindValue(config.displayName.isEmpty() ? config.deviceId : config.displayName);
@@ -448,6 +449,7 @@ bool SqliteRepository::saveDeviceConfig(const DeviceConfig& config)
     q.addBindValue(config.enabled ? 1 : 0);
     q.addBindValue(config.autoConnect ? 1 : 0);
     q.addBindValue(static_cast<double>(config.ratedCurrentA));
+    q.addBindValue(config.protocolType);
     return q.exec();
 }
 
@@ -466,6 +468,7 @@ QList<DeviceConfig> SqliteRepository::loadAllDeviceConfigs()
         cfg.enabled = q.value(QStringLiteral("enabled")).toInt() != 0;
         cfg.autoConnect = q.value(QStringLiteral("auto_connect")).toInt() != 0;
         cfg.ratedCurrentA = static_cast<float>(q.value(QStringLiteral("rated_current_a")).toDouble());
+        cfg.protocolType = q.value(QStringLiteral("protocol_type")).toInt();
         result.append(cfg);
     }
     return result;

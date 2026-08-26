@@ -9,6 +9,13 @@
 
 namespace motor::simulator {
 
+enum class ProtocolFaultMode {
+    None,
+    CrcError,
+    InvalidLength,
+    Truncated
+};
+
 class DeviceSession : public QObject {
     Q_OBJECT
 public:
@@ -17,6 +24,7 @@ public:
 
     void start();
     DeviceId deviceId() const;
+    void setProtocolFault(ProtocolFaultMode mode);
 
 signals:
     void disconnected();
@@ -36,6 +44,7 @@ private:
     quint32 _sequence{0};
     qint64 _lastHeartbeatMs{0};
     bool _registered{false};
+    ProtocolFaultMode _protocolFault{ProtocolFaultMode::None};
 
     void handleFrame(const protocol::Frame& frame);
     void sendFrame(protocol::MessageType type, const QByteArray& payload);

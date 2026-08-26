@@ -23,3 +23,7 @@ add_test(NAME AlarmEngine.all COMMAND alarm_engine_test)
 add_executable(persistence_test persistence_test.cpp)
 target_link_libraries(persistence_test motor_common GTest::gtest_main Qt6::Core Qt6::Sql)
 add_test(NAME Persistence.all COMMAND persistence_test)
+
+add_executable(protocol_adapter_test protocol_adapter_test.cpp)
+target_link_libraries(protocol_adapter_test motor_common GTest::gtest_main Qt6::Core Qt6::Network)
+add_test(NAME ProtocolAdapter.all COMMAND protocol_adapter_test)

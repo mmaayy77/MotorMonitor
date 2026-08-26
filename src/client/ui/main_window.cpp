@@ -3,10 +3,13 @@
 #include "realtime_chart.h"
 #include "history_page.h"
 #include "log_page.h"
+#include "performance_panel.h"
 #include "device_config_dialog.h"
 #include "connection_manager.h"
+#include "communication_worker.h"
+#include "storage_worker.h"
+#include "device_connection.h"
 #include "alarm_engine/alarm_engine.h"
-#include "persistence/sqlite_repository.h"
 #include <QSplitter>
 #include <QListView>
 #include <QVBoxLayout>
@@ -20,19 +23,23 @@
 #include <QHeaderView>
 #include <QTextEdit>
 #include <QDateTime>
+#include <QMetaObject>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QThread>
+#include <QMessageBox>
 
 namespace motor {
 
-MainWindow::MainWindow(std::shared_ptr<ConnectionManager> connManager,
-                       std::shared_ptr<AlarmEngine> alarmEngine,
-                       std::shared_ptr<Repository> repo,
+MainWindow::MainWindow(CommunicationWorker* commWorker,
+                       StorageWorker* storageWorker,
                        QWidget* parent)
     : QMainWindow(parent)
-    , _connManager(std::move(connManager))
-    , _alarmEngine(std::move(alarmEngine))
-    , _repo(std::move(repo))
+    , _commWorker(commWorker)
+    , _storageWorker(storageWorker)
+    , _connManager(commWorker->connectionManager())
+    , _alarmEngine(commWorker->alarmEngine())
+    , _repo(storageWorker->repository())
 {
     _statusTimer = new QTimer(this);
     connect(_statusTimer, &QTimer::timeout, this, &MainWindow::onStatusBarRefresh);
@@ -69,7 +76,7 @@ void MainWindow::setupUi()
     monitorLayout->addWidget(_trendPanel, 1);
     monitorLayout->addWidget(_alarmPanel, 1);
 
-    _historyPage = new HistoryPage(_connManager, _repo);
+    _historyPage = new HistoryPage(_connManager, _storageWorker);
 
     _logPage = new LogPage();
 
@@ -140,6 +147,9 @@ void MainWindow::setupDeviceList()
 
     _listStatusLabel = new QLabel(QStringLiteral("在线: 0 / 0"), _listPanel);
     layout->addWidget(_listStatusLabel);
+
+    _perfPanel = new PerformancePanel(_listPanel);
+    layout->addWidget(_perfPanel);
 }
 
 void MainWindow::setupDetailPanel()
@@ -225,6 +235,14 @@ void MainWindow::setupDetailPanel()
     speedRow->addStretch();
     layout->addLayout(speedRow);
 
+    _diagnosisLabel = new QLabel(QStringLiteral("无活动告警"), _detailPanel);
+    _diagnosisLabel->setStyleSheet(QStringLiteral("color: #2ecc71; font-size: 12px; padding: 4px;"));
+    layout->addWidget(_diagnosisLabel);
+
+    _lastCommandLabel = new QLabel(_detailPanel);
+    _lastCommandLabel->setStyleSheet(QStringLiteral("color: #7f8c8d; font-size: 11px;"));
+    layout->addWidget(_lastCommandLabel);
+
     connect(_connectBtn, &QPushButton::clicked, this, &MainWindow::onConnectClicked);
     connect(_disconnectBtn, &QPushButton::clicked, this, &MainWindow::onDisconnectClicked);
     connect(_startBtn, &QPushButton::clicked, this, &MainWindow::onStartClicked);
@@ -237,6 +255,10 @@ void MainWindow::setupAlarmPanel()
 {
     _alarmPanel = new QGroupBox(QStringLiteral("告警记录"));
     auto* layout = new QVBoxLayout(_alarmPanel);
+
+    _alarmStatsLabel = new QLabel(QStringLiteral("激活: 0  已确认: 0  已恢复: 0  | 总计: 0"), _alarmPanel);
+    _alarmStatsLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #555; padding: 2px;"));
+    layout->addWidget(_alarmStatsLabel);
 
     _alarmTable = new QTableWidget(0, 5, _alarmPanel);
     _alarmTable->setHorizontalHeaderLabels(
@@ -277,9 +299,9 @@ void MainWindow::setupTrendPanel()
 void MainWindow::loadDefaultDevices()
 {
     QList<DeviceConfig> configs;
-    if (_repo && _repo->isOpen()) {
-        configs = _repo->loadAllDeviceConfigs();
-    }
+    QMetaObject::invokeMethod(_storageWorker, "loadAllDeviceConfigs",
+                              Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(QList<DeviceConfig>, configs));
 
     if (configs.isEmpty()) {
         DeviceConfig cfg;
@@ -290,13 +312,13 @@ void MainWindow::loadDefaultDevices()
         cfg.enabled = true;
         cfg.autoConnect = true;
         configs.append(cfg);
-        if (_repo && _repo->isOpen()) {
-            _repo->saveDeviceConfig(cfg);
+        if (_storageWorker->isOpen()) {
+            _storageWorker->saveDeviceConfig(cfg);
         }
     }
 
     for (const auto& cfg : configs) {
-        _connManager->addDevice(cfg);
+        _commWorker->addDevice(cfg);
         DeviceSnapshot snap;
         snap.telemetry.deviceId = cfg.deviceId;
         snap.connectionState = ConnectionState::Disconnected;
@@ -313,15 +335,15 @@ void MainWindow::loadDefaultDevices()
         onDeviceSelected(idx);
     }
 
-    connect(_connManager.get(), &ConnectionManager::connectionStateChanged,
+    connect(_commWorker, &CommunicationWorker::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
-    connect(_connManager.get(), &ConnectionManager::telemetryReceived,
+    connect(_commWorker, &CommunicationWorker::telemetryReceived,
             this, &MainWindow::onTelemetryReceived);
-    connect(_connManager.get(), &ConnectionManager::commandResultReceived,
+    connect(_commWorker, &CommunicationWorker::commandResultReceived,
             this, &MainWindow::onCommandResult);
-    connect(_alarmEngine.get(), &AlarmEngine::alarmRaised,
+    connect(_commWorker, &CommunicationWorker::alarmRaised,
             this, &MainWindow::onAlarmRaised);
-    connect(_alarmEngine.get(), &AlarmEngine::alarmStateChanged,
+    connect(_commWorker, &CommunicationWorker::alarmStateChanged,
             this, &MainWindow::onAlarmStateChanged);
 
     statusBar()->showMessage(QStringLiteral("就绪 - 点击上线连接设备"));
@@ -332,7 +354,13 @@ void MainWindow::onDeviceSelected(const QModelIndex& index)
 {
     if (!index.isValid()) return;
     _selectedDevice = _deviceModel->data(index, DeviceListModel::DeviceIdRole).toString();
+    _chart->clearData();
+    _latestTelemetry = Telemetry{};
+    _needsRefresh = true;
+    _lastCommandResult = CommandResult{};
+    _lastCommandLabel->clear();
     updateDetailPanel(_selectedDevice);
+    updateButtonStates();
 }
 
 void MainWindow::updateDetailPanel(const DeviceId& deviceId)
@@ -387,6 +415,7 @@ void MainWindow::updateOperatingStateDisplay(OperatingState state)
 void MainWindow::onTelemetryReceived(DeviceId deviceId, const Telemetry& telemetry)
 {
     _messageCount++;
+    _perfPanel->recordMessage();
 
     DeviceSnapshot snap;
     snap.telemetry = telemetry;
@@ -396,10 +425,9 @@ void MainWindow::onTelemetryReceived(DeviceId deviceId, const Telemetry& telemet
     snap.activeAlarmCount = static_cast<int>(_alarmEngine->activeAlarms(deviceId).size());
     _deviceModel->updateSnapshot(snap);
 
-    _alarmEngine->processTelemetry(deviceId, telemetry, snap.receivedAtMs);
-
-    if (_repo && _repo->isOpen()) {
-        _repo->saveTelemetry(telemetry);
+    if (_storageWorker->isOpen()) {
+        _storageWorker->saveTelemetry(telemetry);
+        _perfPanel->recordWrite();
     }
 
     if (deviceId == _selectedDevice) {
@@ -415,17 +443,19 @@ void MainWindow::onTelemetryReceived(DeviceId deviceId, const Telemetry& telemet
 void MainWindow::onConnectionStateChanged(DeviceId deviceId, ConnectionState oldState, ConnectionState newState)
 {
     Q_UNUSED(oldState)
-    DeviceSnapshot snap;
-    snap.telemetry.deviceId = deviceId;
-    snap.connectionState = newState;
-    snap.receivedAtMs = QDateTime::currentMSecsSinceEpoch();
-    snap.stale = (newState != ConnectionState::Online);
-    snap.activeAlarmCount = static_cast<int>(_alarmEngine->activeAlarms(deviceId).size());
-    _deviceModel->updateSnapshot(snap);
+    _deviceModel->updateConnectionState(deviceId, newState,
+        static_cast<int>(_alarmEngine->activeAlarms(deviceId).size()));
 
     int online = _connManager->onlineCount();
     int total = static_cast<int>(_connManager->allConnections().size());
     _listStatusLabel->setText(QStringLiteral("在线: %1 / %2").arg(online).arg(total));
+
+    if (newState == ConnectionState::Reconnecting) {
+        _perfPanel->recordReconnect();
+    }
+    if (newState == ConnectionState::ProtocolError) {
+        _perfPanel->recordError();
+    }
 
     if (deviceId == _selectedDevice && newState == ConnectionState::Online) {
         appendLog(QString("[%1] %2 已连接成功").arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"))).arg(deviceId));
@@ -475,8 +505,9 @@ void MainWindow::onConnectionStateChanged(DeviceId deviceId, ConnectionState old
 void MainWindow::onAlarmRaised(const AlarmEvent& event)
 {
     addAlarmEvent(event);
-    if (_repo && _repo->isOpen()) {
-        _repo->saveAlarmEvent(event);
+    updateAlarmStats();
+    if (_storageWorker->isOpen()) {
+        _storageWorker->saveAlarmEvent(event);
     }
 }
 
@@ -522,8 +553,13 @@ void MainWindow::onCommandResult(DeviceId deviceId, const CommandResult& result)
         .arg(deviceId)
         .arg(result.message));
 
-    if (_repo && _repo->isOpen()) {
-        _repo->saveCommandResult(deviceId, result);
+    if (deviceId == _selectedDevice) {
+        _lastCommandResult = result;
+        updateLastCommandDisplay();
+    }
+
+    if (_storageWorker->isOpen()) {
+        _storageWorker->saveCommandResult(deviceId, result);
     }
 }
 
@@ -536,7 +572,7 @@ void MainWindow::onConnectClicked()
         appendLog(QString("%1 已在线").arg(_selectedDevice));
         return;
     }
-    conn->connectToDevice();
+    _commWorker->connectToDevice(_selectedDevice);
     appendLog(QString("[%1] 正在连接 %2...")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
         .arg(_selectedDevice));
@@ -554,7 +590,7 @@ void MainWindow::onDisconnectClicked()
     appendLog(QString("[%1] %2 正在下线...")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
         .arg(_selectedDevice));
-    conn->disconnectDevice();
+    _commWorker->disconnectDevice(_selectedDevice);
 }
 
 void MainWindow::onStartClicked()
@@ -571,7 +607,7 @@ void MainWindow::onStartClicked()
     req.deviceId = _selectedDevice;
     req.type = CommandType::Start;
     req.sentAtMs = QDateTime::currentMSecsSinceEpoch();
-    conn->sendCommand(req);
+    _commWorker->sendCommand(_selectedDevice, req);
     appendLog(QString("[%1] %2 发送启动命令")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
         .arg(_selectedDevice));
@@ -587,7 +623,7 @@ void MainWindow::onStopClicked()
     req.deviceId = _selectedDevice;
     req.type = CommandType::Stop;
     req.sentAtMs = QDateTime::currentMSecsSinceEpoch();
-    conn->sendCommand(req);
+    _commWorker->sendCommand(_selectedDevice, req);
     appendLog(QString("[%1] %2 发送停止命令")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
         .arg(_selectedDevice));
@@ -603,7 +639,7 @@ void MainWindow::onEmergencyStopClicked()
     req.deviceId = _selectedDevice;
     req.type = CommandType::EmergencyStop;
     req.sentAtMs = QDateTime::currentMSecsSinceEpoch();
-    conn->sendCommand(req);
+    _commWorker->sendCommand(_selectedDevice, req);
     appendLog(QString("%1 已发送急停命令!").arg(_selectedDevice));
 }
 
@@ -622,15 +658,10 @@ void MainWindow::onSetSpeedClicked()
     req.type = CommandType::SetTargetSpeed;
     req.targetSpeedRpm = static_cast<quint16>(_speedSpin->value());
     req.sentAtMs = QDateTime::currentMSecsSinceEpoch();
-    if (conn->sendCommand(req)) {
-        appendLog(QString("[%1] %2 设置目标转速: %3 RPM")
+    _commWorker->sendCommand(_selectedDevice, req);
+    appendLog(QString("[%1] %2 设置目标转速: %3 RPM")
             .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
             .arg(_selectedDevice).arg(req.targetSpeedRpm));
-    } else {
-        appendLog(QString("[%1] %2 设置转速命令发送失败")
-            .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
-            .arg(_selectedDevice));
-    }
 }
 
 void MainWindow::onAckAlarmClicked()
@@ -642,7 +673,7 @@ void MainWindow::onAckAlarmClicked()
     auto alarmIdStr = timeItem->data(Qt::UserRole).toString();
     auto alarmId = QUuid::fromString(alarmIdStr);
     if (alarmId.isNull()) return;
-    _alarmEngine->acknowledgeAlarm(alarmId, QDateTime::currentMSecsSinceEpoch());
+    _commWorker->acknowledgeAlarm(alarmId, QDateTime::currentMSecsSinceEpoch());
     appendLog(QString("[%1] 告警已确认")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"))));
 }
@@ -656,7 +687,7 @@ void MainWindow::onClearAlarmClicked()
     auto alarmIdStr = timeItem->data(Qt::UserRole).toString();
     auto alarmId = QUuid::fromString(alarmIdStr);
     if (alarmId.isNull()) return;
-    _alarmEngine->closeAlarm(alarmId, QDateTime::currentMSecsSinceEpoch());
+    _commWorker->closeAlarm(alarmId, QDateTime::currentMSecsSinceEpoch());
     _alarmRowMap.remove(alarmId);
     _alarmTable->removeRow(row);
     for (auto& kv : _alarmRowMap) {
@@ -676,8 +707,9 @@ void MainWindow::appendLog(const QString& message)
 void MainWindow::onAlarmStateChanged(const AlarmEvent& event)
 {
     updateAlarmRow(event.alarm);
-    if (_repo && _repo->isOpen()) {
-        _repo->saveAlarmEvent(event);
+    updateAlarmStats();
+    if (_storageWorker->isOpen()) {
+        _storageWorker->saveAlarmEvent(event);
     }
 
     QString stateText;
@@ -749,8 +781,9 @@ void MainWindow::updateGlobalStatusBar()
     int rate = _messageCount;
     _messageCount = 0;
 
-    QString msg = QStringLiteral("在线: %1/%2 | 活动告警: %3 | 速率: %4 帧/秒 | %5")
+    QString msg = QStringLiteral("在线: %1/%2 | 活动告警: %3 | 速率: %4 帧/秒 | UI线程: %5 | %6")
         .arg(online).arg(total).arg(activeAlarms).arg(rate)
+        .arg(reinterpret_cast<quintptr>(QThread::currentThreadId()), 0, 16)
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")));
     statusBar()->showMessage(msg);
 }
@@ -773,6 +806,9 @@ void MainWindow::onRefreshTick()
 
     updateOperatingStateDisplay(_latestTelemetry.operatingState);
 
+    updateButtonStates();
+    updateDiagnosisDisplay();
+
     auto* conn = _connManager->connection(_selectedDevice);
     if (conn) {
         _statusLabel->setText(conn->isConnected() ? QStringLiteral("在线") : QStringLiteral("离线"));
@@ -788,7 +824,7 @@ void MainWindow::onAddDeviceClicked()
     if (dlg.exec() == QDialog::Accepted) {
         auto cfg = dlg.deviceConfig();
         if (cfg.deviceId.isEmpty()) return;
-        _connManager->addDevice(cfg);
+        _commWorker->addDevice(cfg);
         DeviceSnapshot snap;
         snap.telemetry.deviceId = cfg.deviceId;
         snap.connectionState = ConnectionState::Disconnected;
@@ -796,8 +832,8 @@ void MainWindow::onAddDeviceClicked()
         snap.stale = true;
         snap.activeAlarmCount = 0;
         _deviceModel->updateSnapshot(snap);
-        if (_repo && _repo->isOpen()) {
-            _repo->saveDeviceConfig(cfg);
+        if (_storageWorker->isOpen()) {
+            _storageWorker->saveDeviceConfig(cfg);
         }
         appendLog(QString("[%1] 已添加设备: %2")
             .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
@@ -826,18 +862,24 @@ void MainWindow::onDeleteDeviceClicked()
     if (_selectedDevice.isEmpty()) return;
     auto* conn = _connManager->connection(_selectedDevice);
     if (!conn) return;
+
+    auto result = QMessageBox::question(this, QStringLiteral("确认删除"),
+        QStringLiteral("确定要删除设备 %1 吗？").arg(_selectedDevice),
+        QMessageBox::Yes | QMessageBox::No);
+    if (result != QMessageBox::Yes) return;
+
     if (conn->isConnected()) {
         conn->disconnectDevice();
     }
     _deviceModel->removeDevice(_selectedDevice);
-    _connManager->removeDevice(_selectedDevice);
+    _commWorker->removeDevice(_selectedDevice);
     appendLog(QString("[%1] 已删除设备: %2")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
         .arg(_selectedDevice));
     _historyPage->refreshDeviceList();
     _logPage->removeDeviceFromFilter(_selectedDevice);
-    if (_repo && _repo->isOpen()) {
-        _repo->deleteDeviceConfig(_selectedDevice);
+    if (_storageWorker->isOpen()) {
+        _storageWorker->deleteDeviceConfig(_selectedDevice);
     }
     _selectedDevice.clear();
 }
@@ -858,6 +900,101 @@ void MainWindow::onFilterStateChanged(int index)
     }
 }
 
+void MainWindow::updateButtonStates()
+{
+    if (_selectedDevice.isEmpty()) {
+        _connectBtn->setEnabled(false);
+        _disconnectBtn->setEnabled(false);
+        _startBtn->setEnabled(false);
+        _stopBtn->setEnabled(false);
+        _emergencyBtn->setEnabled(false);
+        _setSpeedBtn->setEnabled(false);
+        return;
+    }
+
+    auto* conn = _connManager->connection(_selectedDevice);
+    bool online = conn && conn->isConnected();
+    bool running = online && _latestTelemetry.operatingState == OperatingState::Running;
+    bool stopped = online && _latestTelemetry.operatingState == OperatingState::Stopped;
+
+    _connectBtn->setEnabled(!online);
+    _disconnectBtn->setEnabled(online);
+    _startBtn->setEnabled(stopped);
+    _stopBtn->setEnabled(running);
+    _emergencyBtn->setEnabled(running);
+    _setSpeedBtn->setEnabled(running);
+    _speedSpin->setEnabled(running);
+}
+
+void MainWindow::updateDiagnosisDisplay()
+{
+    if (_selectedDevice.isEmpty()) {
+        _diagnosisLabel->setText(QStringLiteral("请选择设备"));
+        _diagnosisLabel->setStyleSheet(QStringLiteral("color: #7f8c8d; font-size: 12px; padding: 4px;"));
+        return;
+    }
+
+    auto alarms = _alarmEngine->activeAlarms(_selectedDevice);
+    if (alarms.isEmpty()) {
+        _diagnosisLabel->setText(QStringLiteral("无活动告警"));
+        _diagnosisLabel->setStyleSheet(QStringLiteral("color: #2ecc71; font-size: 12px; padding: 4px;"));
+        return;
+    }
+
+    QStringList lines;
+    for (const auto& a : alarms) {
+        QString sev = (a.severity == AlarmSeverity::Critical)
+            ? QStringLiteral("严重") : QStringLiteral("警告");
+        QString text = QStringLiteral("%1: %2 实际值 %3, 阈值 %4")
+            .arg(sev, ruleName(a.rule))
+            .arg(a.actualValue, 0, 'f', 1).arg(a.threshold, 0, 'f', 1);
+        lines << text;
+    }
+    _diagnosisLabel->setText(lines.join(QStringLiteral("\n")));
+    _diagnosisLabel->setStyleSheet(QStringLiteral(
+        "color: #e74c3c; font-size: 12px; padding: 4px; background: #fdecea; border-radius: 4px;"));
+}
+
+void MainWindow::updateLastCommandDisplay()
+{
+    if (_lastCommandResult.message.isEmpty()) {
+        _lastCommandLabel->clear();
+        return;
+    }
+    QString typeStr;
+    switch (_lastCommandResult.type) {
+    case CommandType::Start: typeStr = QStringLiteral("启动"); break;
+    case CommandType::Stop: typeStr = QStringLiteral("停止"); break;
+    case CommandType::SetTargetSpeed: typeStr = QStringLiteral("调速"); break;
+    case CommandType::EmergencyStop: typeStr = QStringLiteral("急停"); break;
+    default: typeStr = QStringLiteral("其他"); break;
+    }
+    QString status = (_lastCommandResult.status == CommandStatus::Succeeded)
+        ? QStringLiteral("成功") : QStringLiteral("失败");
+    QColor color = (_lastCommandResult.status == CommandStatus::Succeeded)
+        ? QColor(46, 204, 113) : QColor(231, 76, 60);
+    _lastCommandLabel->setText(QStringLiteral("最近控制: %1 → %2 (%3)")
+        .arg(typeStr, status, _lastCommandResult.message));
+    _lastCommandLabel->setStyleSheet(QStringLiteral(
+        "color: %1; font-size: 11px;").arg(color.name()));
+}
+
+void MainWindow::updateAlarmStats()
+{
+    int active = 0, acked = 0, recovered = 0;
+    for (int i = 0; i < _alarmTable->rowCount(); ++i) {
+        auto* stateItem = _alarmTable->item(i, 4);
+        if (!stateItem) continue;
+        auto text = stateItem->text();
+        if (text == QStringLiteral("激活")) active++;
+        else if (text == QStringLiteral("已确认")) acked++;
+        else if (text == QStringLiteral("已恢复")) recovered++;
+    }
+    int total = _alarmTable->rowCount();
+    _alarmStatsLabel->setText(QStringLiteral("激活: %1  已确认: %2  已恢复: %3  | 总计: %4")
+        .arg(active).arg(acked).arg(recovered).arg(total));
+}
+
 void MainWindow::onBatchGenerateClicked()
 {
     DeviceConfig base;
@@ -866,14 +1003,14 @@ void MainWindow::onBatchGenerateClicked()
     base.enabled = true;
     base.autoConnect = true;
 
-    for (int i = 1; i <= 10; ++i) {
+    for (int i = 1; i <= 100; ++i) {
         DeviceConfig cfg = base;
         cfg.deviceId = QStringLiteral("MOTOR-%1").arg(i, 4, 10, QChar('0'));
         cfg.displayName = QStringLiteral("%1号电机").arg(i);
 
         if (_connManager->connection(cfg.deviceId)) continue;
 
-        _connManager->addDevice(cfg);
+        _commWorker->addDevice(cfg);
         DeviceSnapshot snap;
         snap.telemetry.deviceId = cfg.deviceId;
         snap.connectionState = ConnectionState::Disconnected;
@@ -882,13 +1019,13 @@ void MainWindow::onBatchGenerateClicked()
         snap.activeAlarmCount = 0;
         _deviceModel->updateSnapshot(snap);
         _logPage->addDeviceToFilter(cfg.deviceId);
-        if (_repo && _repo->isOpen()) {
-            _repo->saveDeviceConfig(cfg);
+        if (_storageWorker->isOpen()) {
+            _storageWorker->saveDeviceConfig(cfg);
         }
     }
 
     _historyPage->refreshDeviceList();
-    appendLog(QString("[%1] 已批量生成 MOTOR-0001 ~ MOTOR-0010")
+    appendLog(QString("[%1] 已批量生成 MOTOR-0001 ~ MOTOR-0100")
         .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"))));
 }
 

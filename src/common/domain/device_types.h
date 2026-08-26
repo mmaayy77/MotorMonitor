@@ -59,6 +59,7 @@ struct DeviceConfig {
     bool enabled{true};
     bool autoConnect{true};
     float ratedCurrentA{12.0F};
+    int protocolType{0};
     struct Thresholds {
         float temperatureWarningC{85.0F};
         float temperatureWarningRecoveryC{80.0F};

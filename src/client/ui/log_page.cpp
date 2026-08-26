@@ -3,6 +3,11 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QScrollBar>
+#include <QDir>
+#include <QFile>
+#include <QTextStream>
+#include <QFileInfo>
+#include <QStandardPaths>
 
 namespace motor {
 
@@ -64,6 +69,15 @@ void LogPage::setupUi()
     _logView->setFont(QFont(QStringLiteral("Consolas"), 10));
     _logView->setStyleSheet(QStringLiteral("background: #1e1e1e; color: #d4d4d4;"));
     mainLayout->addWidget(_logView, 1);
+
+    _logDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+              + QStringLiteral("/logs");
+    QDir().mkpath(_logDir);
+
+    _flushTimer = new QTimer(this);
+    _flushTimer->setInterval(5000);
+    connect(_flushTimer, &QTimer::timeout, this, &LogPage::flushToFile);
+    _flushTimer->start();
 }
 
 void LogPage::appendLog(LogLevel level, LogCategory category,
@@ -207,6 +221,54 @@ void LogPage::removeDeviceFromFilter(const QString& deviceId)
             return;
         }
     }
+}
+
+void LogPage::saveToFile()
+{
+    QFile file(_logDir + QStringLiteral("/system.log"));
+    file.open(QIODevice::Append | QIODevice::Text);
+    QTextStream stream(&file);
+    stream.setEncoding(QStringConverter::Utf8);
+
+    for (const auto& entry : _buffer) {
+        stream << QStringLiteral("[%1] [%2] [%3] %4\n")
+            .arg(entry.timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")))
+            .arg(levelText(entry.level))
+            .arg(entry.deviceId.isEmpty() ? QStringLiteral("-") : entry.deviceId)
+            .arg(entry.message);
+    }
+    _buffer.clear();
+    file.close();
+
+    rotateLogFiles();
+}
+
+void LogPage::flushToFile()
+{
+    if (_buffer.isEmpty()) return;
+    saveToFile();
+}
+
+void LogPage::rotateLogFiles()
+{
+    const int maxSize = 10 * 1024 * 1024;
+    const int maxFiles = 5;
+
+    QFileInfo fi(_logDir + QStringLiteral("/system.log"));
+    if (!fi.exists() || fi.size() < maxSize) return;
+
+    for (int i = maxFiles - 1; i >= 0; --i) {
+        QString oldName = _logDir + QStringLiteral("/system.%1.log").arg(i);
+        QString newName = _logDir + QStringLiteral("/system.%1.log").arg(i + 1);
+        if (i == maxFiles - 1) {
+            QFile::remove(newName);
+        }
+        if (QFile::exists(oldName)) {
+            QFile::rename(oldName, newName);
+        }
+    }
+    QFile::rename(_logDir + QStringLiteral("/system.log"),
+                  _logDir + QStringLiteral("/system.0.log"));
 }
 
 }

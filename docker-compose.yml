@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  motor-monitor:
+    build: .
+    container_name: motor_monitor
+    environment:
+      - QT_QPA_PLATFORM=offscreen
+      - DISPLAY=:99
+    volumes:
+      - motor_data:/root/.local/share/MotorMonitor
+    restart: unless-stopped
+
+volumes:
+  motor_data:

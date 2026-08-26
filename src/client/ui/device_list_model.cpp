@@ -138,6 +138,17 @@ void DeviceListModel::updateSnapshot(const DeviceSnapshot& snapshot)
     }
 }
 
+void DeviceListModel::updateConnectionState(DeviceId deviceId, ConnectionState state, int alarmCount)
+{
+    int idx = indexOf(deviceId);
+    if (idx < 0) return;
+    _devices[idx].snapshot.connectionState = state;
+    _devices[idx].snapshot.stale = (state != ConnectionState::Online);
+    _devices[idx].snapshot.activeAlarmCount = alarmCount;
+    auto modelIndex = createIndex(idx, 0);
+    emit dataChanged(modelIndex, modelIndex, { StatusRole, StatusColorRole });
+}
+
 void DeviceListModel::removeDevice(DeviceId deviceId)
 {
     int idx = indexOf(deviceId);

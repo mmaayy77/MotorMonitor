@@ -1,5 +1,6 @@
 #include "device_session.h"
 #include "protocol/message_codec.h"
+#include "domain/command_types.h"
 #include <QHostAddress>
 #include <QDebug>
 
@@ -96,7 +97,39 @@ void DeviceSession::sendFrame(protocol::MessageType type, const QByteArray& payl
     frame.requestId = 0;
     frame.timestampMs = _connectedTimer.elapsed();
     frame.payload = payload;
-    _socket->write(protocol::encodeFrame(frame));
+
+    auto encoded = protocol::encodeFrame(frame);
+
+    switch (_protocolFault) {
+    case ProtocolFaultMode::CrcError:
+        if (!encoded.isEmpty()) {
+            encoded[encoded.size() - 1] = static_cast<char>(encoded[encoded.size() - 1] ^ 0xFF);
+        }
+        break;
+    case ProtocolFaultMode::InvalidLength:
+        if (encoded.size() >= 9) {
+            auto corrupt = static_cast<char>(0xFF);
+            encoded[2] = corrupt;
+            encoded[3] = corrupt;
+            encoded[4] = corrupt;
+            encoded[5] = corrupt;
+        }
+        break;
+    case ProtocolFaultMode::Truncated:
+        if (encoded.size() > 10) {
+            encoded = encoded.left(encoded.size() / 2);
+        }
+        break;
+    case ProtocolFaultMode::None:
+        break;
+    }
+
+    _socket->write(encoded);
+}
+
+void DeviceSession::setProtocolFault(ProtocolFaultMode mode)
+{
+    _protocolFault = mode;
 }
 
 void DeviceSession::sendDeviceRegister()
@@ -111,6 +144,17 @@ void DeviceSession::sendCommandResult(const CommandResult& result)
 
 void DeviceSession::processCommand(const CommandRequest& request)
 {
+    if (request.type == CommandType::InjectProtocolFault) {
+        _protocolFault = static_cast<ProtocolFaultMode>(request.protocolFaultMode);
+        CommandResult result;
+        result.requestId = request.requestId;
+        result.deviceId = _deviceId;
+        result.type = request.type;
+        result.status = CommandStatus::Succeeded;
+        result.message = QStringLiteral("Protocol fault mode: %1").arg(request.protocolFaultMode);
+        sendCommandResult(result);
+        return;
+    }
     auto result = _model->execute(request);
     sendCommandResult(result);
 }
