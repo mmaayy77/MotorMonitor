@@ -19,7 +19,8 @@ int main(int argc, char* argv[]) {
     QApplication::setApplicationName(QStringLiteral("MotorMonitor"));
     QApplication::setOrganizationName(QStringLiteral("MotorMonitor"));
 
-    app.setStyleSheet(QStringLiteral(R"(
+    /* Theme is controlled by MainWindow; the application starts in light mode. */
+    /*
         QMainWindow { background: #1e1e2e; }
         QGroupBox {
             font-weight: bold; border: 1px solid #45475a;
@@ -80,7 +81,7 @@ int main(int argc, char* argv[]) {
             background: #45475a; min-height: 30px; border-radius: 5px;
         }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-    )"));
+    )")); */
 
     auto dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dataDir);

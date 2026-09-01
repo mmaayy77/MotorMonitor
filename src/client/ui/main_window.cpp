@@ -28,8 +28,47 @@
 #include <QTabWidget>
 #include <QThread>
 #include <QMessageBox>
+#include <QApplication>
+#include <QToolBar>
 
 namespace motor {
+
+namespace {
+
+const QString kDarkStyleSheet = QStringLiteral(R"(
+    QMainWindow { background: #1e1e2e; }
+    QGroupBox { font-weight: bold; border: 1px solid #45475a; border-radius: 6px;
+        margin-top: 12px; padding-top: 12px; color: #cdd6f4; }
+    QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; color: #89b4fa; }
+    QTableWidget { background: #181825; alternate-background-color: #1e1e2e;
+        gridline-color: #313244; color: #cdd6f4; selection-background-color: #45475a; }
+    QHeaderView::section { background: #313244; color: #a6adc8; font-weight: bold;
+        padding: 4px; border: none; border-bottom: 1px solid #45475a; }
+    QListView { background: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; }
+    QListView::item:selected { background: #45475a; }
+    QLabel { color: #cdd6f4; }
+    QPushButton { background: #45475a; color: #cdd6f4; border: none; border-radius: 4px;
+        padding: 6px 14px; font-weight: bold; }
+    QPushButton:hover { background: #585b70; }
+    QSpinBox, QDoubleSpinBox, QComboBox, QDateTimeEdit { background: #313244; color: #cdd6f4;
+        border: 1px solid #45475a; border-radius: 4px; padding: 4px; }
+    QSpinBox::up-button, QDateTimeEdit::up-button, QDoubleSpinBox::up-button,
+    QSpinBox::down-button, QDateTimeEdit::down-button, QDoubleSpinBox::down-button {
+        subcontrol-origin: border; width: 18px; }
+    QSpinBox::up-button, QDateTimeEdit::up-button, QDoubleSpinBox::up-button { subcontrol-position: top right; }
+    QSpinBox::down-button, QDateTimeEdit::down-button, QDoubleSpinBox::down-button { subcontrol-position: bottom right; }
+    QComboBox QAbstractItemView { background: #313244; color: #cdd6f4; selection-background-color: #45475a; }
+    QLineEdit { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 4px; }
+    QStatusBar, QToolBar { background: #181825; color: #a6adc8; }
+    QTabWidget::pane { border: 1px solid #45475a; background: #1e1e2e; }
+    QTabBar::tab { background: #313244; color: #a6adc8; padding: 6px 16px; border: 1px solid #45475a; }
+    QTabBar::tab:selected { background: #1e1e2e; color: #cdd6f4; }
+    QScrollBar:vertical { background: #181825; width: 10px; }
+    QScrollBar::handle:vertical { background: #45475a; min-height: 30px; border-radius: 5px; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+)");
+
+}
 
 MainWindow::MainWindow(CommunicationWorker* commWorker,
                        StorageWorker* storageWorker,
@@ -85,10 +124,30 @@ void MainWindow::setupUi()
     _tabWidget->addTab(_historyPage, QStringLiteral("历史查询"));
     _tabWidget->addTab(_logPage, QStringLiteral("运行日志"));
 
+    auto* themeBar = addToolBar(QStringLiteral("主题"));
+    themeBar->setMovable(false);
+    _themeToggleBtn = new QPushButton(this);
+    _themeToggleBtn->setToolTip(QStringLiteral("切换日间/夜间主题"));
+    connect(_themeToggleBtn, &QPushButton::clicked, this, &MainWindow::onThemeToggleClicked);
+    themeBar->addWidget(_themeToggleBtn);
+
     _mainSplitter->addWidget(_listPanel);
     _mainSplitter->addWidget(_tabWidget);
     _mainSplitter->setStretchFactor(0, 1);
     _mainSplitter->setStretchFactor(1, 4);
+    applyTheme();
+}
+
+void MainWindow::applyTheme()
+{
+    qApp->setStyleSheet(_darkMode ? kDarkStyleSheet : QString());
+    _themeToggleBtn->setText(_darkMode ? QStringLiteral("切换日间") : QStringLiteral("切换夜间"));
+}
+
+void MainWindow::onThemeToggleClicked()
+{
+    _darkMode = !_darkMode;
+    applyTheme();
 }
 
 void MainWindow::setupDeviceList()
@@ -229,6 +288,8 @@ void MainWindow::setupDetailPanel()
     _speedSpin = new QSpinBox(_detailPanel);
     _speedSpin->setRange(0, 3000);
     _speedSpin->setValue(1500);
+    _speedSpin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
+    _speedSpin->setAccelerated(true);
     _setSpeedBtn = new QPushButton(QStringLiteral("设置"), _detailPanel);
     speedRow->addWidget(_speedSpin);
     speedRow->addWidget(_setSpeedBtn);
@@ -354,7 +415,7 @@ void MainWindow::onDeviceSelected(const QModelIndex& index)
 {
     if (!index.isValid()) return;
     _selectedDevice = _deviceModel->data(index, DeviceListModel::DeviceIdRole).toString();
-    _chart->clearData();
+    _chart->setDevice(_selectedDevice);
     _latestTelemetry = Telemetry{};
     _needsRefresh = true;
     _lastCommandResult = CommandResult{};
@@ -432,7 +493,7 @@ void MainWindow::onTelemetryReceived(DeviceId deviceId, const Telemetry& telemet
 
     if (deviceId == _selectedDevice) {
         _latestTelemetry = telemetry;
-        _chart->appendData(telemetry.temperatureC,
+        _chart->appendData(deviceId, telemetry.temperatureC,
                            static_cast<double>(telemetry.speedRpm),
                            telemetry.currentA);
     }

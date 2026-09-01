@@ -15,19 +15,26 @@ RealtimeChart::RealtimeChart(QWidget* parent)
     _buffer.reserve(static_cast<qsizetype>(_maxPoints));
 }
 
-void RealtimeChart::appendData(double temperature, double speed, double current)
+void RealtimeChart::setDevice(const QString& deviceId)
 {
-    _buffer.append({temperature, speed, current});
-    while (_buffer.size() > _maxPoints) {
-        _buffer.removeFirst();
-    }
+    _currentDevice = deviceId;
+    _buffer = _deviceBuffers.value(deviceId);
     update();
 }
 
-void RealtimeChart::clearData()
+void RealtimeChart::appendData(const QString& deviceId, double temperature,
+                               double speed, double current)
 {
-    _buffer.clear();
-    update();
+    auto& deviceBuffer = _deviceBuffers[deviceId];
+    deviceBuffer.append({temperature, speed, current});
+    while (deviceBuffer.size() > _maxPoints) {
+        deviceBuffer.removeFirst();
+    }
+
+    if (deviceId == _currentDevice) {
+        _buffer = deviceBuffer;
+        update();
+    }
 }
 
 void RealtimeChart::paintEvent(QPaintEvent* event)

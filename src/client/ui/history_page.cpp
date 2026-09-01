@@ -54,11 +54,17 @@ void HistoryPage::setupUi()
     filterLayout->addWidget(new QLabel(QStringLiteral("从:")));
     _fromEdit = new QDateTimeEdit(QDateTime::currentDateTime().addDays(-1));
     _fromEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+    _fromEdit->setCalendarPopup(true);
+    _fromEdit->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
+    _fromEdit->setKeyboardTracking(true);
     filterLayout->addWidget(_fromEdit);
 
     filterLayout->addWidget(new QLabel(QStringLiteral("到:")));
     _toEdit = new QDateTimeEdit(QDateTime::currentDateTime());
     _toEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+    _toEdit->setCalendarPopup(true);
+    _toEdit->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
+    _toEdit->setKeyboardTracking(true);
     filterLayout->addWidget(_toEdit);
 
     _queryBtn = new QPushButton(QStringLiteral("查询"));

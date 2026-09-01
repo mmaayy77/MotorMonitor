@@ -67,7 +67,6 @@ void LogPage::setupUi()
     _logView = new QTextEdit();
     _logView->setReadOnly(true);
     _logView->setFont(QFont(QStringLiteral("Consolas"), 10));
-    _logView->setStyleSheet(QStringLiteral("background: #1e1e1e; color: #d4d4d4;"));
     mainLayout->addWidget(_logView, 1);
 
     _logDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)

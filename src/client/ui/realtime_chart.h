@@ -3,6 +3,8 @@
 #include <QWidget>
 #include <QVector>
 #include <QPointF>
+#include <QHash>
+#include <QString>
 
 namespace motor {
 
@@ -11,8 +13,8 @@ class RealtimeChart : public QWidget {
 public:
     explicit RealtimeChart(QWidget* parent = nullptr);
 
-    void appendData(double temperature, double speed, double current);
-    void clearData();
+    void setDevice(const QString& deviceId);
+    void appendData(const QString& deviceId, double temperature, double speed, double current);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -26,6 +28,8 @@ private:
     };
 
     QVector<DataPoint> _buffer;
+    QHash<QString, QVector<DataPoint>> _deviceBuffers;
+    QString _currentDevice;
     int _maxPoints{300};
     int _marginLeft{60};
     int _marginRight{20};

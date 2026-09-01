@@ -67,6 +67,7 @@ private slots:
     void onBatchGenerateClicked();
     void onFilterTextChanged(const QString& text);
     void onFilterStateChanged(int index);
+    void onThemeToggleClicked();
 
 private:
     void setupUi();
@@ -82,6 +83,7 @@ private:
     void updateLastCommandDisplay();
     void updateAlarmStats();
     void updateGlobalStatusBar();
+    void applyTheme();
     void appendLog(const QString& message);
     void addAlarmEvent(const AlarmEvent& event);
     void updateAlarmRow(const Alarm& alarm);
@@ -140,6 +142,7 @@ private:
     QPushButton* _addDeviceBtn{nullptr};
     QPushButton* _editDeviceBtn{nullptr};
     QPushButton* _deleteDeviceBtn{nullptr};
+    QPushButton* _themeToggleBtn{nullptr};
 
     QHash<QUuid, int> _alarmRowMap;
     QTimer* _statusTimer{nullptr};
@@ -148,6 +151,7 @@ private:
     bool _needsRefresh{false};
     Telemetry _latestTelemetry;
     CommandResult _lastCommandResult;
+    bool _darkMode{false};
 };
 
 }
