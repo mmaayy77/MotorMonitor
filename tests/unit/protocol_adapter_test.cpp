@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <QtEndian>
 #include "protocol/protocol_adapter.h"
 #include "protocol/custom_protocol_adapter.h"
 #include "protocol/modbus_tcp_adapter.h"
