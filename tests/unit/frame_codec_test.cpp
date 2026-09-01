@@ -3,6 +3,7 @@
 #include "protocol/frame_codec.h"
 #include "protocol/crc32.h"
 #include <QByteArray>
+#include <QtEndian>
 
 using namespace motor::protocol;
 
