@@ -1,5 +1,6 @@
 #include "modbus_tcp_adapter.h"
 #include <QDebug>
+#include <QtEndian>
 
 namespace motor::protocol {
 
