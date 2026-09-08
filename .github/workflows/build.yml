@@ -7,11 +7,8 @@ on:
     branches: [master, main]
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        qt_version: [6]
 
     steps:
       - uses: actions/checkout@v4
@@ -38,4 +35,28 @@ jobs:
         run: cmake --build build --target all -j$(nproc)
 
       - name: Run Tests
-        run: cd build && ctest --output-on-failure -V
+        run: ctest --test-dir build --output-on-failure -V
+
+  build-windows:
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Configure CMake
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --config Release --target all --parallel
+
+      - name: Run Tests
+        run: ctest --test-dir build -C Release --output-on-failure -V

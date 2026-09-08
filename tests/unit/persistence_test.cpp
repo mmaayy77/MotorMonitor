@@ -5,6 +5,8 @@
 #include "domain/command_types.h"
 #include "domain/persistence_types.h"
 #include <QCoreApplication>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryFile>
 #include <QUuid>
 
@@ -122,6 +124,24 @@ TEST_F(PersistenceTest, SaveAndQueryTelemetry)
     ASSERT_EQ(result.size(), 2);
     EXPECT_FLOAT_EQ(result[0].temperatureC, 65.0F);
     EXPECT_FLOAT_EQ(result[1].temperatureC, 60.0F);
+}
+
+TEST_F(PersistenceTest, EnablesWriteAheadLogging)
+{
+    const QString connectionName = QStringLiteral("wal_verify_%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    auto db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+    db.setDatabaseName(_path);
+    ASSERT_TRUE(db.open());
+
+    {
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec(QStringLiteral("PRAGMA journal_mode")));
+        ASSERT_TRUE(query.next());
+        EXPECT_EQ(query.value(0).toString().toLower(), QStringLiteral("wal"));
+    }
+
+    db.close();
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 TEST_F(PersistenceTest, QueryTelemetryWithTimeRange)

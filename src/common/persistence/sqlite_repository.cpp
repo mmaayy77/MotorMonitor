@@ -39,6 +39,16 @@ bool SqliteRepository::initialize()
         return false;
     }
 
+    QSqlQuery pragmas(_db);
+    if (!pragmas.exec(QStringLiteral("PRAGMA journal_mode=WAL"))) {
+        _db.close();
+        return false;
+    }
+    if (!pragmas.exec(QStringLiteral("PRAGMA busy_timeout=5000"))) {
+        _db.close();
+        return false;
+    }
+
     if (!createTables()) {
         _db.close();
         return false;

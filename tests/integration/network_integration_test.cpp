@@ -3,6 +3,8 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <QObject>
+#include <memory>
+#include <vector>
 #include "device_server.h"
 #include "device_connection.h"
 #include "domain/command_types.h"
@@ -13,6 +15,7 @@ using namespace motor::simulator;
 namespace {
 
 const quint16 TEST_PORT = 19000;
+const quint16 STRESS_TEST_PORT = 19001;
 const DeviceId TEST_DEVICE("MOTOR-TEST-01");
 
 }
@@ -106,6 +109,54 @@ TEST_F(NetworkIntegrationTest, SendCommandAndGetResponse)
 
     EXPECT_TRUE(gotResult);
     EXPECT_EQ(result.requestId, 12345);
+}
+
+TEST_F(NetworkIntegrationTest, SupportsOneHundredSimultaneousDevices)
+{
+    constexpr int deviceCount = 100;
+    auto stressServer = std::make_unique<DeviceServer>(STRESS_TEST_PORT);
+    ASSERT_TRUE(stressServer->start());
+
+    std::vector<std::unique_ptr<DeviceConnection>> connections;
+    connections.reserve(deviceCount);
+
+    int onlineCount = 0;
+    int telemetryCount = 0;
+    for (int i = 0; i < deviceCount; ++i) {
+        DeviceConfig config;
+        config.deviceId = DeviceId(QStringLiteral("MOTOR-STRESS-%1").arg(i + 1, 4, 10, QLatin1Char('0')));
+        config.host = QStringLiteral("127.0.0.1");
+        config.port = STRESS_TEST_PORT;
+        config.enabled = true;
+        config.autoConnect = false;
+
+        auto connection = std::make_unique<DeviceConnection>(config);
+        QObject::connect(connection.get(), &DeviceConnection::connectionStateChanged,
+            [&onlineCount](DeviceId, ConnectionState, ConnectionState newState) {
+                if (newState == ConnectionState::Online) {
+                    ++onlineCount;
+                }
+            });
+        QObject::connect(connection.get(), &DeviceConnection::telemetryReceived,
+            [&telemetryCount](DeviceId, const Telemetry&) {
+                ++telemetryCount;
+            });
+        connections.push_back(std::move(connection));
+    }
+
+    for (const auto& connection : connections) {
+        ASSERT_TRUE(connection->connectToDevice());
+    }
+
+    QEventLoop loop;
+    QTimer::singleShot(8000, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    EXPECT_EQ(onlineCount, deviceCount);
+    EXPECT_GE(telemetryCount, deviceCount);
+
+    connections.clear();
+    stressServer->stop();
 }
 
 int main(int argc, char** argv)
